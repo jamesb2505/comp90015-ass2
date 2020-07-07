@@ -1,0 +1,182 @@
+\documentclass[12pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{xspace}
+\usepackage{graphicx}
+\usepackage[T1]{fontenc}
+\usepackage[justification=centering]{caption}
+\usepackage{wrapfig}
+\usepackage{listings}
+% \usepackage{bera}
+
+\newcommand{\naive}{\textit{naīve} }
+\newcommand{\sorted}{\textit{sorted} }
+\newcommand{\original}{\textit{original} }
+\newcommand{\fc}{\textit{cascading} }
+\newcommand{\fig}[2]{
+  \begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{#1.png}
+    \caption{#2}
+    \label{fig:#1}
+  \end{figure}
+}
+
+\graphicspath{ {./figs/} }
+
+\colorlet{punct}{red!60!black}
+\definecolor{delim}{RGB}{20,105,176}
+\colorlet{numb}{magenta!60!black}
+
+\lstdefinestyle{json}{
+  % language=json,
+  basicstyle=\small\normalfont\ttfamily,
+  upquote=true,
+  numbers=left,
+  numberstyle=\scriptsize,
+  stepnumber=1,
+  numbersep=8pt,
+  showstringspaces=false,
+  frame=lines,
+  % backgroundcolor=\color{background},
+  literate=
+   *{0}{{{\color{numb}0}}}{1}
+    {1}{{{\color{numb}1}}}{1}
+    {2}{{{\color{numb}2}}}{1}
+    {3}{{{\color{numb}3}}}{1}
+    {4}{{{\color{numb}4}}}{1}
+    {5}{{{\color{numb}5}}}{1}
+    {6}{{{\color{numb}6}}}{1}
+    {7}{{{\color{numb}7}}}{1}
+    {8}{{{\color{numb}8}}}{1}
+    {9}{{{\color{numb}9}}}{1}
+    {:}{{{\color{punct}:}}}{1}
+    {,}{{{\color{punct},}}}{1}
+    {\{}{{{\color{delim}\{}}}{1}
+    {\}}{{{\color{delim}\}}}}{1}
+    {[}{{{\color{delim}[}}}{1}
+    {]}{{{\color{delim}]}}}{1},
+}
+
+\begin{document}
+
+\begin{center}
+  {\sc The University of Melbourne \\
+  School of Computing and Information Systems \\ 
+  COMP90015 Distributed Systems}
+  \bigskip \\
+  {\Large\bf Distributed Whiteboard -- Assignment 2, 2020}
+  \bigskip \\
+  {\large James Barnes}
+\end{center}
+
+\section{Problem Context}
+The problem posed for this assignment is to create a system that acts as a distributed whiteboard. This system must handle various features typical of distributed systems, such as concurrency and failure tolerance.
+
+This system must support multiple users with a single acting as the manager. All users can draw using various tools on the whiteboard, with these drawings shown to all connected users. The manager has extra responsibilities, such as managing connected users and has the ability to save and reload the state of a previous whiteboard instance.
+
+\section{System Design}
+This system can broadly be decomposed into two parts. These parts are the server and client side. There is overlap between these two for various aspects of the system, allowing for good programming practices, such as code re-use.
+
+There is an addictional class named \texttt{Fields} which acts as a common source for the various constants used in communcations. This class is absent from diagrams as the inclusion of this class does not add useful information.
+
+Further, various fields and methods, such as getters, setters, and various helper methods have been ommitted from diagrams, as they also do not add useful information.
+
+\subsection{Server Side}
+The server side is composed mostly in three parts, namely the \textit{server}, the \textit{client users} and the \textit{manager} and it's GUI.
+
+The server's primary purpose is to handle the communication bewtween user's. When a user recieves a message from a client or the manager, the server typically will rebroadcast this to all connected clients and the manager. Further, the server handles new incoming connections by first confirming with the manager to allow the new connection and sending them a message with the current state of the board.
+
+The client user's purpose is to handle the communcation with a client instance. This communcation is performed using TCP sockets, allowing for guaranteed in-order transmission of messages. Any message recieved from the socket is sent to the server to broadcast to all users, and any message from the server is sent to a thread pool (of size 1) that is then sent by the sending thread once idle. The user also handles the behaviour when a user is kicked.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.90\textwidth]{class-design-server.png}
+  \caption{A Class Design Diagram representing the Server portion of this System.}
+  \label{fig:server}
+\end{figure}
+
+The manager is a special type of user. It's communcation is performed directly via method calls with the server as the manager is a local object tied directly to a whiteboard server instance. The manager has it's own GUI, which is an extension of the client GUI (defined in the Client Side section) with extra functions to allow the manager to kick users and save or load the state of the whiteboard. Further, the state of the whiteboard as seen by the manager is considered canonical, and is used by the server if the state of the whiteboard is needed in any instance. 
+
+\newpage
+
+\subsection{Client Side}
+The client side is composed of two components, namely the \textit{client} and the \textit{GUI}.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.6\textwidth]{class-design-client.png}
+  \caption{A Class Design Diagram representing the Client portion of this project.}
+  \label{fig:client}
+\end{figure}
+
+The client portion of the client side is responsible for handling communication with a connected server. As previously mentioned, this communcation is performed via TCP sockets. All messages recieved by the client are forwarded to the GUI and all messages from the GUI are sent to the server via the socket. 
+
+The GUI behaves as the manager GUI does, minus the extra functionality included from the manager. This behaviour includes interpretting messages from the server and updating the state of the whiteboard, managing the state of the whiteboard, and packaging messages encapsulating the client user's input to be sent to the server. 
+
+\subsection{Communication}
+The client and server sides communcate together using JSON via sockets. Any messages not conforming to the JSON syntax are discarded. 
+
+The JSON messages fall into four types, indicated by their \texttt{command} field's value.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.6\textwidth]{sequence-broadcast.png}
+  \caption{
+    A Sequence Diagram showing the behaviour of \\ the server when recieving a message from a connected client.
+  }
+  \label{fig:broadcast}
+\end{figure}
+
+\texttt{board}-type messages denote a message relating to the entire state of the board. If the message contains a \texttt{board} field, this field contains a base 64 encoded string containing the state of the whiteboard. If there is no \texttt{board} field, this is interpretted as a board reset and the whiteboard should return to a default blank state.
+
+Messages marked by the \texttt{resync} command denote a request from a client to recieve a copy of the whiteboard's current state. When recieved by a client, these messages shuld be ignored. When recieved by the server, the server should respond with a \texttt{board} message containing the current state of the whiteboard.
+
+Messages with a value of \texttt{users} for the \texttt{command} field contain a list of user information in the form of an array. This array contained in the \texttt{users} field is composed of numerous JSON objects containing each user's corresponding \texttt{uuid} and \texttt{username}. This message is broadcast whenever there is a change in the list of the currently connected users.
+
+Messages that have the value of \texttt{draw} in the \texttt{command} field contain information about a new object to be drawn to the whiteboard, including the drawing's location, type, and colour. When recieved by a client, the information should be passed to the GUI to allow the object to be drawn on the whiteboard. When the server recieves such a message, this should be broadcast to all users, propogating the state change.
+
+\begin{lstlisting}[
+  style=json, 
+  caption={A simplified JSON Schema for the messages.},
+  captionpos=b,
+]
+{
+  "type": object",
+  "required": [ "command" ],
+  "properties": {
+    "command": {
+      "type": "string",
+      "enum": [ "resync", "draw", "board", "users", "username" ]
+    },
+    "username": { "type": "string" }
+    "board": { "type": "string" }
+    "draw": { "type": "object" },
+    "users": { "type": "array" }
+  }
+}
+\end{lstlisting}
+
+When first connecting to a server, the client must send a message with an \texttt{username} command. This message should contain a \texttt{username} field containing the client's specified username. Failure to do this will terminate the client's user on the server. When this message is recieved, a pop-up in the Manager's GUI shows a message confirming that the new connection should be allowed. If the manager accepts the new connection, the client is then added to a list of clients which causes a rebroadcast of the list of users to all connected users (including the manager).
+
+\newpage
+
+\section{Critical Analysis}
+There were a few key design choices that had to be made when designing this system. 
+
+Firstly, there is a choice of which communication method to use. The chosen method is to send messages encoded in JSON via sockets. This choice was made over alternatives such as Java's RMI. The reason this was chosen over RMI was to allow for more homogeneity in the client-side. As RMI is exclusive to Java, the use of such a technology limits the availability of this system to Java only. With the use of JSON over sockets, clients can be built using any language/platform, provided the message protocols are followed. I believe this is a major drawback of RMI in this use-case, and as such the use of JSON and sockets is an adavantage. 
+
+Further, to ensure that race conditions are dealt with adequately that arise from multiple users trying to draw on the whiteboard at the same time, the server utilises a single-thread pool per client to write each message to respective clients. This ensures that the order of broadcasts to all users is consistent, however this does lend preference to users with a faster connection to the server as their messges arrive first. There is no way to remove this preference and I feel that this choice is reasonable as it simplifies the broadcast process.
+
+The state of the whiteboard is saved in a special \texttt{.wb} file. This file is a PNG unde the hood. A raw PNG could be used instead to save the state of the whtieboard, however the choice was made to utilise a different file format. This choice was made as it abstracts the true format of the file, hiding unnecessary details from the user.
+
+\section{Additional Features}
+All additional features outlined in the specification have been implemented. These features are the manager's ability to save or load the whiteboard's state and the ability for the manager to kick other users. 
+
+Following the original specification, extra tools such as the freehand tool and the eraser have been implemented also. An extra tool, a color picker, which allows the user to choose a colour on the whiteboard is also implemented. And finally, controls to set the sixe of the text, freehand, eraser, and line tools have been implemented.
+
+Aditionally, there is a Resync item in the File menu. If a client is to click this item, the server will send a copy of the board to the client. If the manager clicks this button, the server will broadcast a copy of the board to all connected users. This allows any user at any time to ensure that they (or in the case of the manager, that all) share consistent state.
+
+\end{document}
